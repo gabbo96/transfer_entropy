@@ -6,8 +6,15 @@ Contributor:
 """
 
 import numpy as np
+import infomeasure as im
 from scipy import stats
 from scipy import ndimage
+
+
+def nbins_fd(X):
+    """Retrieve the number of bins for a time series X using the Freedman-Diaconis rule"""
+    binX = int((max(X) - min(X)) / (2 * stats.iqr(X) / (len(X) ** (1.0 / 3))))
+    return binX
 
 
 def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
@@ -44,8 +51,8 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
 
     # number of bins for X and Y using Freeman-Diaconis rule
     # histograms built with numpy.histogramdd
-    binX = int((max(X) - min(X)) / (2 * stats.iqr(X) / (len(X) ** (1.0 / 3))))
-    binY = int((max(Y) - min(Y)) / (2 * stats.iqr(Y) / (len(Y) ** (1.0 / 3))))
+    binX = nbins_fd(X)
+    binY = nbins_fd(Y)
 
     # Definition of arrays of shape (D,N) to be transposed in histogramdd()
     x3 = np.array([X[delay:], Y[:-delay], X[:-delay]])
@@ -104,4 +111,33 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
 
     # Transfer Entropy
     TE = np.sum(elements)
+    return TE
+
+
+def transfer_entropy_im(X, Y, delay=1):
+    """Computes transfer entropy using the infomeasure package
+
+        args:
+            - X (1D array):
+                    time series of scalars (1D array)
+            - Y (1D array):
+                    time series of scalars (1D array)
+    kwargs:
+            - delay (int):
+                    step in tuple (x_n, y_{n - delay}, x_(n - delay))
+            - gaussian_sigma (int):
+                    sigma to be used
+                    default set at None: no gaussian filtering applied
+    returns:
+            - TE (float):
+                    transfer entropy between X and Y given the history of X
+    """
+    if len(X) != len(Y):
+        raise ValueError("time series entries need to have same length")
+    binX = nbins_fd(X)
+    binY = nbins_fd(Y)
+    X_dig = np.digitize(X, bins=np.linspace(X.min(), X.max(), binX))
+    Y_dig = np.digitize(Y, bins=np.linspace(Y.min(), Y.max(), binY))
+    TE = im.transfer_entropy(Y_dig, X_dig, approach="discrete", prop_time=delay)
+
     return TE
