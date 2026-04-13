@@ -94,13 +94,13 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
     # Calculating elements in TE summation
     elements = []
     for i in range(len(Xrange)):
-        px = p1[i]
         for j in range(len(Yrange)):
-            pxy = p2[i][j]
-
             for k in range(len(X2range)):
-                pxx2 = p2delay[i][k]
-                pxyx2 = p3[i][j][k]
+                # Fixed indexing: use k for X_past, i for X_future, j for Y_past
+                px = p1[k]  # P(X_past)
+                pxy = p2[k][j]  # P(X_past, Y_past)
+                pxx2 = p2delay[i][k]  # P(X_future, X_past)
+                pxyx2 = p3[i][j][k]  # P(X_future, Y_past, X_past)
 
                 arg1 = float(pxy * pxx2)
                 arg2 = float(pxyx2 * px)
@@ -117,6 +117,114 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
     return TE
 
 
+def transfer_entropy_with_preshifting(X, Y, delay=0, gaussian_sigma=None):
+    """
+    TE implementation with prop_time semantics matching infomeasure.
+    Pre-shifts the series by prop_time, then computes 1-step TE.
+
+    This is equivalent to: Given Y[t] and X[t+prop_time], predict X[t+prop_time+1]
+
+    args:
+            - X (1D array):
+                    time series of scalars (destination variable)
+            - Y (1D array):
+                    time series of scalars (source variable)
+    kwargs:
+            - delay (int):
+                    delay parameter for transfer entropy calculation
+            - gaussian_sigma (int):
+                    sigma for gaussian filtering
+                    default: None (no filtering)
+    returns:
+            - TE (float):
+                    transfer entropy from Y to X with propagation time
+    """
+    if len(X) != len(Y):
+        raise ValueError("time series entries need to have same length")
+
+    # Apply prop_time shift (matching infomeasure's approach)
+    if delay > 0:
+        Y_shifted = Y[:-delay]
+        X_shifted = X[delay:]
+    elif delay < 0:
+        Y_shifted = Y[-delay:]
+        X_shifted = X[:delay]
+    else:
+        Y_shifted = Y
+        X_shifted = X
+
+    # Now compute 1-step TE on the shifted series
+    step_size = 1
+    n = float(len(X_shifted[step_size:]))
+
+    # Binning
+    binX = nbins_fd(X_shifted)
+    binY = nbins_fd(Y_shifted)
+    range_X = (min(X_shifted), max(X_shifted))
+    range_Y = (min(Y_shifted), max(Y_shifted))
+
+    # Create aligned arrays for 1-step prediction
+    x3 = np.array(
+        [X_shifted[step_size:], Y_shifted[:-step_size], X_shifted[:-step_size]]
+    )
+    x2 = np.array([X_shifted[:-step_size], Y_shifted[:-step_size]])
+    x2_delay = np.array([X_shifted[step_size:], X_shifted[:-step_size]])
+
+    p3, bin_p3 = np.histogramdd(
+        sample=x3.T, bins=[binX, binY, binX], range=[range_X, range_Y, range_X]
+    )
+    p2, bin_p2 = np.histogramdd(
+        sample=x2.T, bins=[binX, binY], range=[range_X, range_Y]
+    )
+    p2delay, bin_p2delay = np.histogramdd(
+        sample=x2_delay.T, bins=[binX, binX], range=[range_X, range_X]
+    )
+    p1, bin_p1 = np.histogram(
+        np.array(X_shifted[:-step_size]), bins=binX, range=range_X
+    )
+
+    # Normalize
+    p1 = p1 / n
+    p2 = p2 / n
+    p2delay = p2delay / n
+    p3 = p3 / n
+
+    # Apply gaussian smoothing if requested
+    if gaussian_sigma is not None:
+        s = gaussian_sigma
+        p1 = ndimage.gaussian_filter(p1, sigma=s)
+        p2 = ndimage.gaussian_filter(p2, sigma=s)
+        p2delay = ndimage.gaussian_filter(p2delay, sigma=s)
+        p3 = ndimage.gaussian_filter(p3, sigma=s)
+
+    # Ranges
+    Xrange = bin_p3[0][:-1]
+    Yrange = bin_p3[1][:-1]
+    X2range = bin_p3[2][:-1]
+
+    # Calculate TE
+    elements = []
+    for i in range(len(Xrange)):
+        for j in range(len(Yrange)):
+            for k in range(len(X2range)):
+                px = p1[k]  # P(X_past)
+                pxy = p2[k][j]  # P(X_past, Y_past)
+                pxx2 = p2delay[i][k]  # P(X_future, X_past)
+                pxyx2 = p3[i][j][k]  # P(X_future, Y_past, X_past)
+
+                arg1 = float(pxy * pxx2)
+                arg2 = float(pxyx2 * px)
+
+                if arg1 == 0.0 or arg2 == 0.0:
+                    continue
+
+                term = pxyx2 * np.log2(arg2) - pxyx2 * np.log2(arg1)
+                elements.append(term)
+
+    TE = np.sum(elements)
+    return TE
+
+
 def transfer_entropy_im(X, Y, delay=1):
     """Computes transfer entropy using the infomeasure package
 
@@ -128,6 +236,8 @@ def transfer_entropy_im(X, Y, delay=1):
     kwargs:
             - delay (int):
                     step in tuple (x_n, y_{n - delay}, x_(n - delay))
+                    Note: infomeasure interprets this as prop_time (propagation time),
+                    which pre-shifts the series before computing 1-step TE
             - gaussian_sigma (int):
                     sigma to be used
                     default set at None: no gaussian filtering applied
@@ -139,8 +249,9 @@ def transfer_entropy_im(X, Y, delay=1):
         raise ValueError("time series entries need to have same length")
     binX = nbins_fd(X)
     binY = nbins_fd(Y)
-    X_dig = np.digitize(X, bins=np.linspace(X.min(), X.max(), binX))
-    Y_dig = np.digitize(Y, bins=np.linspace(Y.min(), Y.max(), binY))
+    # FIX: Use binX+1 points to create binX bins (bin edges, not bin centers)
+    X_dig = np.digitize(X, bins=np.linspace(X.min(), X.max(), binX + 1))
+    Y_dig = np.digitize(Y, bins=np.linspace(Y.min(), Y.max(), binY + 1))
     TE = im.transfer_entropy(Y_dig, X_dig, approach="discrete", prop_time=delay)
 
     return TE
