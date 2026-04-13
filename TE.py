@@ -158,10 +158,8 @@ def transfer_entropy_with_preshifting(X, Y, delay=0, gaussian_sigma=None):
     n = float(len(X_shifted[step_size:]))
 
     # Binning
-    binX = nbins_fd(X_shifted)
-    binY = nbins_fd(Y_shifted)
-    range_X = (min(X_shifted), max(X_shifted))
-    range_Y = (min(Y_shifted), max(Y_shifted))
+    binX = np.linspace(X_shifted.min(), X_shifted.max(), nbins_fd(X_shifted) + 1)
+    binY = np.linspace(Y_shifted.min(), Y_shifted.max(), nbins_fd(Y_shifted) + 1)
 
     # Create aligned arrays for 1-step prediction
     x3 = np.array(
@@ -170,18 +168,10 @@ def transfer_entropy_with_preshifting(X, Y, delay=0, gaussian_sigma=None):
     x2 = np.array([X_shifted[:-step_size], Y_shifted[:-step_size]])
     x2_delay = np.array([X_shifted[step_size:], X_shifted[:-step_size]])
 
-    p3, bin_p3 = np.histogramdd(
-        sample=x3.T, bins=[binX, binY, binX], range=[range_X, range_Y, range_X]
-    )
-    p2, bin_p2 = np.histogramdd(
-        sample=x2.T, bins=[binX, binY], range=[range_X, range_Y]
-    )
-    p2delay, bin_p2delay = np.histogramdd(
-        sample=x2_delay.T, bins=[binX, binX], range=[range_X, range_X]
-    )
-    p1, bin_p1 = np.histogram(
-        np.array(X_shifted[:-step_size]), bins=binX, range=range_X
-    )
+    p3, bin_p3 = np.histogramdd(sample=x3.T, bins=[binX, binY, binX])
+    p2, bin_p2 = np.histogramdd(sample=x2.T, bins=[binX, binY])
+    p2delay, bin_p2delay = np.histogramdd(sample=x2_delay.T, bins=[binX, binX])
+    p1, bin_p1 = np.histogram(np.array(X_shifted[:-step_size]), bins=binX)
 
     # Normalize
     p1 = p1 / n
@@ -252,6 +242,6 @@ def transfer_entropy_im(X, Y, delay=1):
     # FIX: Use binX+1 points to create binX bins (bin edges, not bin centers)
     X_dig = np.digitize(X, bins=np.linspace(X.min(), X.max(), binX + 1))
     Y_dig = np.digitize(Y, bins=np.linspace(Y.min(), Y.max(), binY + 1))
-    TE = im.transfer_entropy(Y_dig, X_dig, approach="discrete", prop_time=delay)
+    TE = im.transfer_entropy(Y_dig, X_dig, approach="discrete", prop_time=delay, base=2)
 
     return TE
