@@ -53,19 +53,24 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
     # histograms built with numpy.histogramdd
     binX = nbins_fd(X)
     binY = nbins_fd(Y)
+    range_X = (min(X), max(X))
+    range_Y = (min(Y), max(Y))
 
     # Definition of arrays of shape (D,N) to be transposed in histogramdd()
     x3 = np.array([X[delay:], Y[:-delay], X[:-delay]])
-    x2 = np.array([X[delay:], Y[:-delay]])
+    x2 = np.array([X[:-delay], Y[:-delay]])
     x2_delay = np.array([X[delay:], X[:-delay]])
 
-    p3, bin_p3 = np.histogramdd(sample=x3.T, bins=[binX, binY, binX])
-
-    p2, bin_p2 = np.histogramdd(sample=x2.T, bins=[binX, binY])
-
-    p2delay, bin_p2delay = np.histogramdd(sample=x2_delay.T, bins=[binX, binX])
-
-    p1, bin_p1 = np.histogramdd(sample=np.array(X[delay:]), bins=binX)
+    p3, bin_p3 = np.histogramdd(
+        sample=x3.T, bins=[binX, binY, binX], range=[range_X, range_Y, range_X]
+    )
+    p2, bin_p2 = np.histogramdd(
+        sample=x2.T, bins=[binX, binY], range=[range_X, range_Y]
+    )
+    p2delay, bin_p2delay = np.histogramdd(
+        sample=x2_delay.T, bins=[binX, binX], range=[range_X, range_X]
+    )
+    p1, bin_p1 = np.histogram(np.array(X[:-delay]), bins=binX, range=range_X)
 
     # Hists normalized to obtain densities
     p1 = p1 / n
@@ -101,10 +106,8 @@ def transfer_entropy(X, Y, delay=1, gaussian_sigma=None):
                 arg2 = float(pxyx2 * px)
 
                 # Corrections avoding log(0)
-                if arg1 == 0.0:
-                    arg1 = float(1e-8)
-                if arg2 == 0.0:
-                    arg2 = float(1e-8)
+                if arg1 == 0.0 or arg2 == 0.0:
+                    continue
 
                 term = pxyx2 * np.log2(arg2) - pxyx2 * np.log2(arg1)
                 elements.append(term)
